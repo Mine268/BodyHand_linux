@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
 	argparse::ArgumentParser parser("Pose estimation");
 	parser.add_description(
 		"从配置文件中读取模型信息和相机标定信息，进行姿态估计。"
-		"\n\t第一、二、三行：分别是人体姿态估计模型，人体检测模型，手部姿态估计模型的地址"
+		"\n\t第一、二、三、四行：分别是人体检测模型，人体姿态估计模型，人体检测模型，手部姿态估计模型的地址"
 		"\n\t第四行是一个正整数n，表示总共有多少个视图"
 		"\n\t接下来的n行每行有26个浮点数，前9个表示内参矩阵，接着的9个表示旋转变换矩阵，然后3个表示位移变换向量，最后的5个表示畸变参数"
 		"\n\t最后一行是可写可不写的，用来表示如何从相机坐标系变换到全局坐标系，包含12个浮点数，描述的是全局坐标系在相机坐标系下的三轴方向和原点偏移"
@@ -331,6 +331,11 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 	// 模型文件地址读取
+	if (!std::getline(config_file, body_cfg.yolo_path)) {
+		std::cerr << "无法读取人体检测模型件地址。" << std::endl;
+		config_file.close();
+		return -1;
+	}
 	if (!std::getline(config_file, body_cfg.model_path)) {
 		std::cerr << "无法读取人体姿态估计模型件地址。" << std::endl;
 		config_file.close();

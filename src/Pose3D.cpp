@@ -16,7 +16,9 @@ namespace BodyHand {
 	) :
 		body_model_cfg(_body_model_cfg),
 		hand_model_cfg(_hand_model_cfg),
-		num_views(_num_views)
+		num_views(_num_views),
+		yolo_det(body_model_cfg.yolo_path, cv::Size(640, 640), 0.35f, 0.45f),
+		vit_pose(body_model_cfg.model_path, cv::Size(192, 256), "cuda")
 	{
 		// 参数检查
 		if (!(
@@ -54,7 +56,15 @@ namespace BodyHand {
 	}
 
 	bool PoseEstimator::loadBodyModel() {
-		return body_model.ReadModel(body_model_cfg.model_path, true, 0, true);
+		// return body_model.ReadModel(body_model_cfg.model_path, true, 0, true);
+		// try {
+		// 	yolo_det = YoloOnnx(body_model_cfg.yolo_path, cv::Size(640, 640), 0.35f, 0.45f); // conf_thres, iou_thres, allowed classes
+		// 	vit_pose = VitInference(body_model_cfg.model_path, cv::Size(192, 256), "cuda");
+		// }
+		// catch (const std::exception& e) {
+		// 	return false;
+		// }
+		return true;
 	}
 
 	bool PoseEstimator::loadHandModel() {
@@ -70,64 +80,84 @@ namespace BodyHand {
 		kpss2d.clear();
 		conf_kpss.clear();
 		conf_bodies.clear();
-		for (auto &img : imgs) {
-			std::vector<OutputPose> poses_2d;
-			if (!body_model.OnnxDetect(img, poses_2d)) {
-				return false;
-			}
-			std::vector<std::vector<cv::Point2f>> view2d; // 每个图像中的所有二维姿态
-			std::vector<std::vector<float>> conf_kps;
-			std::vector<float> conf_body;
-			for (auto &pose_2d : poses_2d) {
-				std::vector<cv::Point2f> man2d; // 单个人的二维姿态
-				std::vector<float> man_conf; // 单个人的关节点置信度
-				for (std::size_t j = 0; j < pose_2d.kps.size(); j += 3) {
-					man2d.emplace_back(pose_2d.kps[j], pose_2d.kps[j + 1]);
-					man_conf.emplace_back(pose_2d.kps[j + 2]);
-				}
-				view2d.emplace_back(std::move(man2d));
-				conf_kps.emplace_back(std::move(man_conf));
-				conf_body.emplace_back(pose_2d.confidence);
-			}
-			kpss2d.emplace_back(std::move(view2d));
-			conf_kpss.emplace_back(std::move(conf_kps));
-			conf_bodies.emplace_back(std::move(conf_body));
-		}
-		// kpss2d，conf_kpss，conf_bodies的每个vector元素按照conf_bodies的值进行从大到小排序
-		for (std::size_t i = 0; i < conf_bodies.size(); ++i) {
-			// 获取当前图像的姿态数量 N
-			std::size_t num_poses = conf_bodies[i].size();
 
-			// 如果该图像没有人，则跳过
-			if (num_poses == 0) {
+		for (auto &img_bgr : imgs) {
+			cv::Mat img_rgb;
+			cv::cvtColor(img_bgr, img_rgb, cv::COLOR_BGR2RGB);
+
+			// ---------------------
+			// 1. YOLO 人体检测
+			// ---------------------
+			auto dets = yolo_det.infer(img_bgr, {0});  // 只检测 person 类别
+			if (dets.empty()) {
+				kpss2d.emplace_back();
+				conf_kpss.emplace_back();
+				conf_bodies.emplace_back();
 				continue;
 			}
 
-			// 1. 创建一个索引向量，用于存储原始顺序
-			std::vector<std::size_t> indices(num_poses);
-			std::iota(indices.begin(), indices.end(), 0); // 填充 0, 1, 2, ..., N-1
+			// ---------------------
+			// 2. ViTPose 关键点检测
+			// ---------------------
+			auto kpt_map = vit_pose.inference(img_rgb, dets);
 
-			// 2. 使用 std::sort 和自定义比较函数对索引进行排序
-			// 比较函数基于 conf_bodies[i] 的值进行降序 (从大到小)
-			std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
-				return conf_bodies[i][a] > conf_bodies[i][b];
-				});
+			// ---------------------
+			// 3. 转换为原 estimateBody 输出结构
+			// ---------------------
+			std::vector<std::vector<cv::Point2f>> view2d;
+			std::vector<std::vector<float>> view_conf_kps;
+			std::vector<float> view_conf_body;
 
-			// 3. 根据排序后的索引创建新的向量
-			std::vector<std::vector<cv::Point2f>> sorted_kpss2d_view;
-			std::vector<std::vector<float>> sorted_conf_kpss_view;
-			std::vector<float> sorted_conf_bodies_view;
+			for (size_t i = 0; i < dets.size(); ++i) {
+				if (kpt_map.find(i) == kpt_map.end()) continue;
+				const auto &mat = kpt_map.at(i);  // 17x3
 
-			for (std::size_t index : indices) {
-				sorted_kpss2d_view.emplace_back(std::move(kpss2d[i][index]));
-				sorted_conf_kpss_view.emplace_back(std::move(conf_kpss[i][index]));
-				sorted_conf_bodies_view.emplace_back(conf_bodies[i][index]); // float可以直接复制
+				std::vector<cv::Point2f> pts2d;
+				std::vector<float> confs;
+
+				for (int j = 0; j < mat.rows; ++j) {
+					pts2d.emplace_back(mat.at<float>(j,0), mat.at<float>(j,1));
+					confs.emplace_back(mat.at<float>(j,2));
+				}
+
+				view2d.emplace_back(std::move(pts2d));
+				view_conf_kps.emplace_back(std::move(confs));
+				view_conf_body.emplace_back(dets[i].score);
 			}
 
-			// 4. 用新的排序结果替换原始向量
-			kpss2d[i] = std::move(sorted_kpss2d_view);
-			conf_kpss[i] = std::move(sorted_conf_kpss_view);
-			conf_bodies[i] = std::move(sorted_conf_bodies_view);
+			kpss2d.emplace_back(std::move(view2d));
+			conf_kpss.emplace_back(std::move(view_conf_kps));
+			conf_bodies.emplace_back(std::move(view_conf_body));
+		}
+
+		// ---------------------
+		// 4. 对每个视图按人体置信度排序 (保持你的逻辑)
+		// ---------------------
+		for (std::size_t i = 0; i < conf_bodies.size(); ++i) {
+			size_t N = conf_bodies[i].size();
+			if (N == 0) continue;
+
+			std::vector<size_t> idx(N);
+			std::iota(idx.begin(), idx.end(), 0);
+
+			std::sort(idx.begin(), idx.end(),
+				[&](size_t a, size_t b) {
+					return conf_bodies[i][a] > conf_bodies[i][b];
+				});
+
+			std::vector<std::vector<cv::Point2f>> sorted_kpss2d_view;
+			std::vector<std::vector<float>>       sorted_conf_kpss_view;
+			std::vector<float>                    sorted_conf_bodies_view;
+
+			for (auto id : idx) {
+				sorted_kpss2d_view.emplace_back(std::move(kpss2d[i][id]));
+				sorted_conf_kpss_view.emplace_back(std::move(conf_kpss[i][id]));
+				sorted_conf_bodies_view.emplace_back(conf_bodies[i][id]);
+			}
+
+			kpss2d[i]       = std::move(sorted_kpss2d_view);
+			conf_kpss[i]    = std::move(sorted_conf_kpss_view);
+			conf_bodies[i]  = std::move(sorted_conf_bodies_view);
 		}
 
 		return true;

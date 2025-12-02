@@ -8,6 +8,8 @@
 
 #include "YoloONNX.h"
 #include "HaMeRONNX.h"
+#include "YoloOnnxDet.h"
+#include "VitInference.h"
 
 #define IN
 #define OUT
@@ -22,6 +24,7 @@ namespace BodyHand
 	};
 
 	struct BodyModelConfig {
+		std::string yolo_path;
 		std::string model_path;
 	};
 
@@ -132,7 +135,10 @@ namespace BodyHand
 	private:
 		// 人体检测的 yolo 模型的地址和模型
 		BodyModelConfig body_model_cfg;
-		Yolov8Onnx body_model;
+		// Yolov8Onnx body_model;
+		// 第二种人体检测方案：yolo检测+VitPose估计
+		YoloOnnx yolo_det;
+		VitInference vit_pose;
 		// 人手检测的 HaMeR 模型的地址
 		HandModelConfig hand_model_cfg;
 		HaMeROnnx hand_model;
