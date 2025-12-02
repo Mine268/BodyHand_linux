@@ -54,7 +54,7 @@ namespace BodyHand
 	};
 
 	/// <summary>
-	/// ��+����ؽڵ��⡣��Ҫ�궨�Ķ���ͼ��
+	/// 手+身体关节点检测。需要标定的多视图。
 	/// </summary>
 	class PoseEstimator {
 	public:
@@ -70,13 +70,13 @@ namespace BodyHand
 		~PoseEstimator() {}
 
 		/// <summary>
-		/// ����ͼ���еĶ�ά������̬
+		/// 估计图像中的二维人体姿态
 		/// </summary>
-		/// <param name="imgs">ͼ���б�</param>
-		/// <param name="kpss2d">ÿ��ͼ���е������˵�������̬</param>
-		/// <param name="conf_kpss">ÿ���ؽڵ�����Ŷ�</param>
-		/// <param name="conf_bodies">ÿ���˼������Ŷ�</param>
-		/// <returns>���ؽ���Ƿ���Ч</returns>
+		/// <param name="imgs">图像列表</param>
+		/// <param name="kpss2d">每张图像中的所有人的人体姿态</param>
+		/// <param name="conf_kpss">每个关节点的置信度</param>
+		/// <param name="conf_bodies">每个人检测的置信度</param>
+		/// <returns>返回结果是否有效</returns>
 		bool estimateBody(
 			IN std::vector<cv::Mat>& imgs,
 			OUT std::vector<std::vector<std::vector<cv::Point2f>>>& kpss2d,
@@ -85,13 +85,13 @@ namespace BodyHand
 		);
 
 		/// <summary>
-		/// �����ֲ���̬���ƣ�������һ�����ֺ�����
+		/// 进行手部姿态估计，最多估计一个左手和右手
 		/// </summary>
-		/// <param name="img">���Ŵ�����ͼ��</param>
-		/// <param name="_kps_cam">����42���ֱ�������+����������ռ��е�λ��</param>
-		/// <param name="_kps_img">ͼ���ϵĹؼ���λ��</param>
-		/// <param name="view_ix">����һ����ͼ�н��й���</param>
-		/// <returns>(������Ч��, ������Ч��)</returns>
+		/// <param name="img">单张待估计图像</param>
+		/// <param name="_kps_cam">长度42，分别是左手+右手在相机空间中的位置</param>
+		/// <param name="_kps_img">图像上的关键点位置</param>
+		/// <param name="view_ix">从哪一个视图中进行估计</param>
+		/// <returns>(左手有效性, 右手有效性)</returns>
 		std::tuple<bool, bool> estimateHand(
 			IN cv::Mat& img,
 			OUT std::vector<cv::Point3f>& _kps_cam,
@@ -101,13 +101,13 @@ namespace BodyHand
 		);
 
 		/// <summary>
-		/// ����ȫ������̬����
+		/// 进行全身的姿态估计
 		/// </summary>
-		/// <param name="imgs">����ͼͼ��</param>
-		/// <param name="body_kps">����ؽڵ�</param>
-		/// <param name="hand_kps">�ֲ��ؽڵ㣬ǰ21�������ֵģ���21���������</param>
-		/// <param name="hand_ref_view">����һ����ͼ�н����ֲ�����</param>
-		/// <returns>(ȫ����Ч��, ������Ч��, ������Ч��)</returns>
+		/// <param name="imgs">多视图图像</param>
+		/// <param name="body_kps">人体关节点</param>
+		/// <param name="hand_kps">手部关节点，前21个是人手的，后21个是人体的</param>
+		/// <param name="hand_ref_view">从哪一个视图中进行手部估计</param>
+		/// <returns>(全身有效性, 左手有效性, 右手有效性)</returns>
 		std::tuple<bool, bool, bool> estimatePose(
 			IN std::vector<cv::Mat>& imgs,
 			OUT std::vector<cv::Point3f>& body_kps,
@@ -130,15 +130,15 @@ namespace BodyHand
 		);
 
 	private:
-		// ������� yolo ģ�͵ĵ�ַ��ģ��
+		// 人体检测的 yolo 模型的地址和模型
 		BodyModelConfig body_model_cfg;
 		Yolov8Onnx body_model;
-		// ���ּ��� HaMeR ģ�͵ĵ�ַ
+		// 人手检测的 HaMeR 模型的地址
 		HandModelConfig hand_model_cfg;
 		HaMeROnnx hand_model;
-		// ʹ�õ���ͼ����
+		// 使用的视图数量
 		int num_views;
-		// ����Ĳ���
+		// 相机的参数
 		std::vector<CameraParameter> cameras;
 	};
 

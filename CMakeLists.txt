@@ -92,6 +92,8 @@ add_library(BodyHand STATIC
     src/HaMeRONNX.cpp
     src/Pose3D.cpp
     src/YoloONNX.cpp
+    src/YoloOnnxDet.cpp
+    src/VitInference.cpp
 )
 target_include_directories(BodyHand PRIVATE
     "include/"
